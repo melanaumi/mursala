@@ -1,0 +1,103 @@
+stages:
+  - compile
+  - build
+  - deploy
+
+variables:
+  # CI VARIABLES
+  CI_REGISTRY_USER: adisu-devops
+  CI_REGISTRY_PASSWORD: TYdtRTgYid43_We-EFaR
+  CI_REGISTRY: registry-iconx.air.id
+
+  # IMAGE VARIABLES
+  DOCKER_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME
+
+  # CONTAINER CONFIG
+  DOCKER_MEM_LIMIT: 128M
+
+  # DATASOURCE LOKI
+  DATASOURCE_LOKI: http://10.14.204.239/log/loki/loki/api/v1/push
+
+Compile NPM:
+  stage: compile
+  image: node:14-alpine
+  cache:
+    key: "$CI_BUILD_REF_NAME"
+    paths:
+      - node_modules/
+  before_script:
+    - echo "before script $DOCKER_IMAGE "
+    - node --version
+    - npm --version
+    - npm rebuild node-sass
+    - npm install
+  script:
+    - echo "Compiling the code $DOCKER_IMAGE ..."
+    - echo "Compile complete. $CI_REGISTRY_IMAGE - $CI_COMMIT_REF_NAME"
+    - echo "CI_REGISTRY_IMAGE $CI_REGISTRY_IMAGE"
+    - echo "CI_COMMIT_REF_NAME $CI_COMMIT_REF_NAME"
+    - echo "CI_BUILD_REF_NAME $CI_BUILD_REF_NAME"
+    - >
+      if [ "$CI_COMMIT_REF_NAME" == "development" ]; then
+        echo "VUE_APP_VERSION = $CI_COMMIT_REF_NAME" >> .env.development &&
+        cp .env.development .env.production && npm run build
+      elif [ "$CI_COMMIT_REF_NAME" == "staging" ]; then
+        echo "VUE_APP_VERSION = $CI_COMMIT_REF_NAME" >> .env.staging &&
+        cp .env.staging .env.production && npm run build
+      else
+        echo "VUE_APP_VERSION = $CI_COMMIT_REF_NAME" >> .env.production &&
+        npm run build
+      fi
+  artifacts:
+    name: "dist-$CI_COMMIT_REF_NAME"
+    paths:
+      - dist/
+    expire_in: 1 hour
+  only:
+    - development
+    - staging
+    - main
+  tags:
+    - docker
+
+Build Container:
+  stage: build
+  image: docker:20.10.5
+  services:
+    - docker:dind
+  before_script:
+    - echo "$CI_REGISTRY_USER | $CI_REGISTRY_PASSWORD | $CI_REGISTRY"
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build --no-cache -t $DOCKER_IMAGE --build-arg DIST_FOLDER=dist -f deployment/Dockerfile .
+    - docker push $DOCKER_IMAGE
+  tags:
+    - docker
+
+Deploy Development:
+  stage: deploy
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker stack deploy --orchestrator swarm -c deployment/docker-development.yml --with-registry-auth pesa-web
+  environment:
+    name: URL Development
+    url: https://devweb-esa.plndigital.id
+  tags:
+    - site-dd
+  only:
+    - development
+
+Deploy Staging:
+  stage: deploy
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker stack deploy --orchestrator swarm -c deployment/docker-staging.yml --with-registry-auth pesa-web
+  environment:
+    name: URL Staging
+    url: https://staweb-esa.plndigital.id
+  only:
+    - staging
+  tags:
+    - site-dd

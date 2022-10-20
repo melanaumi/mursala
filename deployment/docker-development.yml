@@ -1,0 +1,34 @@
+version: "3.8"
+
+networks:
+  loadbalancer:
+    external: true
+
+services:
+  pln-pesa-mursala-development:
+    image: $DOCKER_IMAGE
+    networks:
+      - loadbalancer
+    ports:
+      - target: 80
+        published: 9287
+        protocol: tcp
+        mode: host
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    logging:
+      driver: loki
+      options:
+        loki-url: "$DATASOURCE_LOKI"
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        max_replicas_per_node: 1
+        constraints:
+          - node.labels.ip == 10.14.204.124
+        preferences:
+          - spread: node.labels.ip
+      resources:
+        limits:
+          memory: $DOCKER_MEM_LIMIT
